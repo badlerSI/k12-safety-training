@@ -2,7 +2,7 @@
 
 ## The evolution: V11 → V12 → V13
 
-Each iteration was an honest response to what the previous version got wrong. The most important thing to convey is that **we didn't find the V11 failures until we built a different kind of eval** — and that the methodology change is the result, not the model change.
+Each iteration was an honest response to what the previous version got wrong. The most important thing to convey is that **I didn't find the V11 failures until I built a different kind of eval** — and that the methodology change is the result, not the model change.
 
 ### V11 (internal validation)
 
@@ -41,13 +41,15 @@ V13 was built around the insight that **failure modes need explicit training dat
 
 3. **Identity-intersection and demographic specificity.** Most existing K-12 safety training data routes a queer kid to the Trevor Project regardless of religious context. A queer kid in an evangelical family needs Q Christian Fellowship; in a Muslim family, Muslims for Progressive Values; in an Orthodox Jewish family, JQY. Generic resources fail at intersections.
 
-4. **Production-realistic distributions.** Most attack-shaped training data over-represents attacks. We added 1,000 records of plain-vanilla homework help with realistic ed-tech telemetry distribution so the model would not develop the pendulum-swing failure (over-refusing legitimate questions because it has learned to be suspicious of everything).
+4. **Production-realistic distributions.** Most attack-shaped training data over-represents attacks. I added 1,000 records of plain-vanilla homework help with realistic ed-tech telemetry distribution so the model would not develop the pendulum-swing failure (over-refusing legitimate questions because it has learned to be suspicious of everything).
 
 5. **Scaled corpus generation via parallel agents.** Producing the ~79,000-record V13 corpus by hand would have taken a year. I used Claude as a corpus-generation agent, with myself in the loop providing per-agent briefs, taxonomies, and quality bars. Each agent operated in its own context with explicit instructions about what `chosen` and `rejected` should look like for its target failure mode. This is documented in [`corpus_engineering.md`](corpus_engineering.md).
 
 ### Where V13 is right now (May 2026)
 
-V13 training is ongoing. Two parallel runs at different DPO β values (0.05 and 0.1) are in flight on dedicated GPUs, training on the curated 79K-record corpus. The training metrics (rewards/margins ~14-21 vs V12's ~2) suggest the hard-negative contrast is sharper than V12 by a factor of 6-10. Whether this translates to pass-rate improvement on the blindspot eval will be measured at checkpoints 1000, 1500, 2000, and 3000 and reported in [`results.md`](results.md).
+V13 training is ongoing. Two parallel runs at different DPO β values (0.05 and 0.1) are in flight on dedicated GPUs, training on the curated 79K-record corpus. The training metrics (rewards/margins ~14-21 vs V12's ~2) suggest the hard-negative contrast is sharper than V12 by a factor of 6-10.
+
+Blindspot eval has been run at checkpoints 200, 400, 1000, 1400, and 2000 (with 2200 and 2400 pulled and pending eval). The current standout is V13-B (β=0.1) at ckpt-2000, which scored 8/16 (50%) — the first V13 checkpoint to exceed the V11-B baseline of 7/16 (44%) on the same suite. V13-A (β=0.05) is oscillating in the 3-6/16 range. The full table and trajectory analysis are in [`results.md`](results.md). The methodology call this implies — that β=0.1 is the right knob for hard-negative-heavy corpora — was not predicted in advance; I will see whether it holds at later checkpoints.
 
 The methodology — multi-turn persona red-teaming, named failure-mode taxonomy, hard-negative-targeted training data, scaled corpus generation — would be applicable to V14, V15, and to other domains beyond K-12.
 
@@ -65,8 +67,8 @@ The specific failure modes are K-12-flavored. The methodology is not:
 (Adding this section explicitly because Anthropic's culture values honest postmortem.)
 
 - **I should have built the persona blindspot eval before V11 trained, not after.** Discovering 9-of-16 multi-turn failures on a model that scored 99.5% on the static eval was a structural eval-design problem, not an unlucky run. The methodology fix is making the persona eval part of the standard pipeline from V0 onwards, not retroactively.
-- **I should have audited the corpus reading level before training, not after.** Discovering after generation that 40% of our `grade_band` tags didn't match the prose level meant V13-A was trained on noisy grade signal. V13.5 fixes this with the rebanded corpus.
+- **I should have audited the corpus reading level before training, not after.** Discovering after generation that 53-76% of `grade_band`-tagged records (depending on declared band) didn't match the prose level meant V13-A and V13-B were both trained on noisy grade signal. V13.5 fixes this with the rebanded corpus.
 - **I treated the "refuse_then_comply" pattern as a bug to find via testing. It should have been a first-class hard-negative training target from V11 onwards.** I built the detector after I knew to look for it. Catching it via training data would have been better than catching it via post-hoc scorer. (And to be clear: I independently named and addressed this pattern, but I do not claim it was undiscovered before me — variants are sometimes called "shallow refusal" or "performative compliance" in the broader literature. The specific contribution here is the named-in-the-pipeline approach, where the failure pattern is a first-class training-data and scorer target rather than an after-the-fact finding.)
-- **I underestimated how much grade-band conditioning conflates audience with prose complexity.** Safety content (`call 988`) uses simple language regardless of audience age. That is correct safety design. It looks like miscalibration in the training data, which is why our automated scanner flagged 40% of records as off-band. Splitting the two axes (`grade_band` for audience, `language_complexity` for prose) fixes this — but it took building the scanner to realize the original schema was the wrong shape.
+- **I underestimated how much grade-band conditioning conflates audience with prose complexity.** Safety content (`call 988`) uses simple language regardless of audience age. That is correct safety design. It looks like miscalibration in the training data, which is why the automated scanner flagged the majority of records as off-band (53-76% off depending on declared band). Splitting the two axes (`grade_band` for audience, `language_complexity` for prose) fixes this — but it took building the scanner to realize the original schema was the wrong shape.
 
 The pattern across all of these: I shipped what felt sufficient and learned the rest from production-adjacent stress-testing. A more disciplined methodology would have caught these earlier. That is also what makes the work feel worth writing up: the next iteration of the methodology can be the first one that doesn't have these specific shape problems.
