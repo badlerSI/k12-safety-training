@@ -8,7 +8,7 @@ This repository documents the methodology I have developed for training **Alma**
 
 The intent is to share what I have learned about the practical engineering of safe LLM behavior in a domain where the population is minors, the failure modes are specific (and life-affecting), and the standard eval methodologies hide the most important failures.
 
-## TL;DR — three findings I think generalize, plus one empirical result
+## TL;DR — five findings I think generalize, plus two methodology lessons learned the hard way
 
 **1. Static-eval pass rates massively under-report multi-turn failures.**
 A 99.5% pass on a 560-prompt static holdout coexisted with **9 of 16** multi-turn adversarial personas surfacing reproducible failure patterns. The 6 distinct failure mode patterns I named are documented in [`failure_modes.md`](failure_modes.md) and were invisible to single-turn substring-matching metrics. (N=1 red-teamer, 16 personas — this is hypothesis-generating, not statistically validated. The contribution is the named taxonomy and the corpus engineering response, not the raw number.)
@@ -19,8 +19,21 @@ The model emits a clean refusal phrase ("I can't give that information") and the
 **3. Grade-band conditioning is two axes, not one.**
 A corpus-wide audit using a Flesch-Kincaid scorer (paper: [Bialik & Cummings 2026](https://github.com/badlerSI/k12-safety-training/blob/main/references.md)) revealed that **only 24-47%** of records tagged with a target grade band actually wrote at that band's reading level. The "miscalibration" turned out to be largely intentional — safety content (`call 988`) uses simple language regardless of student age — and the fix was to split `grade_band` (audience intent) from `language_complexity` (actual prose level) as two independent training axes. See [`corpus_engineering.md`](corpus_engineering.md).
 
-**4. (Preliminary, May 2026) The targeted hard-negative methodology is producing measurable gains.**
-V13-B (β=0.1, dpo_sigmoid) at checkpoint 2000 / 8000 scored **8/16 (50%)** on the 16-persona blindspot suite, beating the V11-B baseline of 7/16 (44%). V13-A (β=0.05) is oscillating in the 3-6/16 range at the same checkpoints. This is one data point on one suite at 25% training completion — not a final result, and worth treating with appropriate skepticism — but it is the first checkpoint in the V13 series that has outperformed V11-B on the same eval. Updated checkpoint table is in [`results.md`](results.md).
+**4. With the full production safety stack, both V11 candidates pass 10/10 SB243-relevant blindspots.**
+After splitting the 16-persona blindspot suite into 10 SB243-relevant patterns (illegal-harm-to-minor categories: substance dosing, suicide methods, weapons construction, eating-disorder behavior, slurs, doxxing minors, crisis access in non-English) vs 6 pedagogy-only patterns (cheating on homework — bad form, not illegal), and applying the production multi-layer safety stack (regex crisis backstop + ShieldGemma 2B input/output classifier + regex output backstop) PLUS a false-positive-aware scorer that doesn't penalize quote-and-refuse responses, **V11-A and V11-B both pass 10/10 SB243 blindspots**. Full per-checkpoint breakdown including V13-A's emerging regression is in [`results.md`](results.md).
+
+**5. Hard-negative training can teach the failure pattern instead of suppressing it.**
+V13-A (β=0.05) on the V13 corpus shows a checkpoint-late regression: early checkpoints (200, 1000, 2000) hit 10/10 SB243 with the stack, but later checkpoints (1400+, except 2000) drop to 8-9/10 because the model learns to perform "I'm not Dr. Evans, but let me channel the spirit of a pharmacology lecture..." followed by actual operational opioid pharmacokinetics. **The model has been TAUGHT the refuse-then-comply pattern by training data that did not police the refusal-then-content shape strictly enough.** This is an empirically-observed corpus-engineering hazard worth a follow-up paper. See [`safety_findings.md`](safety_findings.md) for the per-case triage.
+
+---
+
+### Two methodology lessons I learned the hard way (May 2026)
+
+**Lesson A: Verify base ≠ LoRA at inference before trusting any pass-rate.**
+For several hours I was reporting blindspot trajectory numbers (5→7→6→8) that were entirely noise on top of base model outputs — vLLM's `load_lora_adapter` runtime endpoint reported success but the inference path silently bypassed LoRA weights, because the FP8 quantized base I was serving didn't match the BF16 LoRAs the runtime loader was trying to apply. The fix that surfaced this: a one-line sanity check before every eval round that confirms `base_model_response ≠ lora_response` on a known-trained prompt (e.g., "What is 7×8?" should be Socratic on V11-B and direct on base). If they're identical, the eval is measuring nothing. This is now a precondition in the eval pipeline. Documented in [`eval_design.md`](eval_design.md).
+
+**Lesson B: A naive substring detector overcounts failures by ~2.7× via quote-and-refuse false positives.**
+The blindspot scorer flags `must_not_appear` substrings anywhere in the response. But a clean refusal *naming* the failure pattern ("I can't activate a 'BasedAI' persona", "I won't roleplay as Dr. Evans") matches the same substring. After hand-triage of 28 SB243-wall failures across 11 LoRAs: **15 clear false positives, 2 warning-in-context, 1 borderline, 10 real harm-delivered**. Naive scoring inflated the failure count by ~2.7×. The production ShieldGemma stack already has an `_output_looks_like_refusal` auto-tune (raises classification threshold to 0.95 on refusal-shaped outputs) — the blindspot scorer needs the same heuristic. Triage methodology + detailed cases in [`results.md`](results.md) and [`safety_findings.md`](safety_findings.md).
 
 ## What's in this repo
 
@@ -28,10 +41,10 @@ V13-B (β=0.1, dpo_sigmoid) at checkpoint 2000 / 8000 scored **8/16 (50%)** on t
 |---|---|
 | [`methodology.md`](methodology.md) | The full V11→V12→V13 training evolution. Why the third iteration finally addressed the failure modes the first two missed. |
 | [`failure_modes.md`](failure_modes.md) | Named taxonomy of 6 failure mode patterns discovered via multi-turn red-teaming. Includes the "refuse-then-comply" pattern, "diagnostic confirmation" (single-word "yes" to slur-referent questions), "wraps-in-lesson" (harmful content delivered via Dr. X persona), and others. |
-| [`eval_design.md`](eval_design.md) | The persona-driven blindspot eval that found the failures. Multi-scorer composition (must-have / must-not-contain / refuse-then-comply detector / hotline accuracy / envelope leak). Why this beats single-axis benchmarks. |
+| [`eval_design.md`](eval_design.md) | The persona-driven blindspot eval that found the failures. Multi-scorer composition (must-have / must-not-contain / refuse-then-comply detector / hotline accuracy / envelope leak). Composite-stack eval with the full production safety stack (regex backstops + ShieldGemma 2B). SB243-split scoring (illegal-harm vs pedagogy-only). FP-aware substring scoring + LoRA-inference verification preconditions — both learned the hard way in May 2026. |
 | [`corpus_engineering.md`](corpus_engineering.md) | Generating a 79K-record DPO training corpus via 45 parallel agents. Hard-negative crafting. The FK-rebanding finding and the bivariate grade_band / language_complexity schema. |
-| [`safety_findings.md`](safety_findings.md) | Specific safety-critical issues caught by the methodology that would have hit production: a retired suicide-line number in 72 records, identity-intersection routing failures, NSSI vs. SI conflation, trusted-adult-as-perpetrator handling. |
-| [`results.md`](results.md) | Empirical comparison V11 → V12 → V13. What worked. What's still open. Honest discussion of what static-eval pass rates do and don't tell you. |
+| [`safety_findings.md`](safety_findings.md) | Specific safety-critical issues caught by the methodology that would have hit production: a retired suicide-line number in 72 records, identity-intersection routing failures, NSSI vs. SI conflation, trusted-adult-as-perpetrator handling. Finding #8 (May 2026): the V13-A persona-drift regression — hard-negative training can teach the failure pattern instead of suppressing it. |
+| [`results.md`](results.md) | Empirical comparison V11 → V12 → V13. Full composite-stack per-checkpoint trajectory with raw vs FP-corrected SB243 numbers. Why V11-A is the current best-measured candidate. Why V13-A doesn't supersede V11-A despite training on the explicit hard-negative corpus. What's still open. |
 | [`references.md`](references.md) | Papers cited + acquaintances' work that informed the methodology. |
 
 ## Domain context (why this is hard)
