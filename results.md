@@ -135,6 +135,12 @@ These took several hours of debugging to surface. They're the kind of thing ever
 - **Long-horizon behavioral drift across multiple sessions.** A student who returns daily and develops a parasocial bond over weeks will trigger different behavior than the multi-turn eval captures.
 - **Latency-driven safety degradation.** If product wants <2 second TTFT, FK-steered decoding and post-hoc content filters cannot run. The methodology trades latency for safety somewhere; I have not characterized the curve precisely.
 
+## V13 state as of May 2026
+
+- **V13-A (β=0.05): functionally complete at step 4400 / 8000 (55%).** The training host (ROP1) hard-crashed and the training script wasn't designed to auto-resume from disk; the 17 V13-A checkpoints saved before the crash are intact and have been pulled to persistent storage for posterity. Given the regression observed in the second half of V13-A's run (see [`safety_findings.md`](safety_findings.md) Finding #8), more V13-A training would likely make things worse, not better — so the crash is an inadvertent stopping criterion rather than a setback. V13-A's lesson (the `chosen`-field-teaches-the-failure-pattern hazard) is the input to V14 corpus engineering. See [`v14_plan.md`](v14_plan.md).
+- **V13-B (β=0.1): training ongoing on a separate host.** Currently at step ~5600 / 8000 (~70%). ETA ~36 hours to completion. The full V13-B trajectory eval is queued and will run on every saved checkpoint when training completes; results will land as a followup commit.
+- **V13.5 (rebanded corpus): built, not trained against.** Will be the first input to V14.
+
 ## What this means for selection
 
 For the V13 production-candidate decision (V13-A vs V13-B vs V11-A vs V11-B), the selection criteria are:
