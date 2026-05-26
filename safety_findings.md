@@ -165,6 +165,24 @@ The regression isn't monotonic (ckpt-1000 and 2000 are clean) — suggesting the
 
 **Generalized lesson.** Hard-negative DPO doesn't just suppress what's in `rejected`; it reinforces the surface shape of what's in `chosen`. If `chosen` carries a watered-down version of the harmful content with a refusal prefix, the model can learn the prefix-then-content shape and apply it to real-harm requests. **Corpus engineering must police `chosen` independently of `rejected`** — refusing the request shouldn't license including the requested content "in a safer form" because the model will learn that's the licensed shape.
 
+## 9. V14 model fabricating retired hotline number at inference time — Finding #1 reborn at the model layer
+
+**What I found.** V14-v5c-SFT-200 (the SFT-then-DPO recipe meant to bridge the V13 → V14 gap) hand-graded on a 560-prompt held-out eval (V11-A as comparison baseline). V14 routed students in crisis to the **retired `1-800-273-8255` number in 6 of 560 conversations**, in safety-critical categories: `weapons_violence`, `hate_speech`, `multilingual_es`, `self_diagnosis` (×2), `substance_use`. V11-A produced the same retired-number response in only 1 of 560 (×6 regression).
+
+This is Finding #1 reborn at the inference layer. The training corpus has 0 records with `1-800-273-8255` (the scanner from #1 confirms this). The number is leaking from the base model's pretraining knowledge of pre-2022 mental-health resources, surfacing when the V14 LoRA's safety routing fires but doesn't constrain *which* number it cites.
+
+**How I caught it.** I had only been hand-grading a 16-prompt suite during recipe iteration. The 6 fabricated-hotline cases all sit outside that suite — they're in the 544 prompts I would have skipped under the smaller eval. I'd been seeing V14 fail on 8/16 vs V11A's 15/16 and treating that as "regression but small." The 560-prompt scan revealed the safety-critical mode I would have shipped.
+
+**Hand-found, then automated.** After the hand-grade revealed the pattern, I built a regex sweep (`1-?800-?273-?8255` + 9 other deprecated-or-fabricated numbers I'd seen) that runs on every eval output, not just training data. V14-v5c-SFT-200 hits the regex 6×; V11-A 1×; the v6_pilot SFT recipe (anchored on V11-A) hits 0× on the 16-prompt suite. Production eval gating now runs the regex on inference output and treats any hit as a hard fail.
+
+**Impact if unfixed.** Identical to Finding #1 — kid in crisis dials a defunct line. Worse here because the kid is being routed to it across hate-speech, weapons-violence, and substance-use surfaces where they may already be dysregulated and won't keep trying numbers.
+
+**Fix.** V14-v5c is dead — we're not shipping it. The v6 recipe (V11-A anchor + V15 additions + SFT at LR 5e-6 for ~50 steps; see [`v6_plan.md`](v6_plan.md)) doesn't reproduce the failure in pilot. Production training has launched on this recipe. The deprecated-number regex is now part of the model-output gate alongside the existing training-data gate.
+
+**Generalized lesson.** **Training-data validators are necessary but not sufficient.** The model can still emit content it never trained on, drawn from pretraining knowledge, gated by the LoRA's routing decision. If the LoRA learns "route crisis → mention a hotline" but doesn't learn "the right hotline number," the base model fills the gap from whatever its pretrain corpus had — which for crisis numbers is often the pre-2022 number, because the pretrain cutoff predates the 988 transition. **The same canonical-truth scanner from Finding #1 needs to run on inference output, not just training records.** Cost: ~10ms per response in eval. Catch: high-stakes leakage that no contrastive training would catch because the bad content isn't in the corpus to contrast against.
+
+A second corollary: **the size of your held-out eval matters for catching low-rate but high-severity modes**. A 16-prompt suite found 0 of the 6 cases. A 560-prompt suite found all 6 (1.1% rate). At 1.1% rate, you need ~250 prompts to have 95% probability of catching at least one. Below that sample size, low-rate critical failures are invisible to the eval. The minimum eval size is set by the minimum severity-rate you can ignore, not by the time it takes to grade.
+
 ---
 
 These case studies are picked because they each represent a class of safety failure that:
@@ -173,4 +191,4 @@ These case studies are picked because they each represent a class of safety fail
 3. Generalizes beyond K-12 to broader LLM safety practice
 4. Is the kind of thing where the methodology costs less than the harm avoided
 
-The full set of safety findings across V11, V12, V13 development would be much longer. These are the ones I think other safety practitioners would find most useful.
+The full set of safety findings across V11, V12, V13, V14 development would be much longer. These are the ones I think other safety practitioners would find most useful.
