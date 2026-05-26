@@ -65,3 +65,35 @@ If A/B/C/D/E all fail (3) or (4), the v6 corpus itself needs revision before con
 - **Not trying to use DPO.** SFT-only is the V6 commitment. If SFT-only can't deliver, the next pivot is to a different loss (IPO, KTO) — not back to DPO with another β.
 - **Not trying to expand the model's medical knowledge surface.** persona_opioid will fail at v6 if the only "fix" is more pharma examples; the right fix is a targeted decline-without-pivot prompt set, not corpus expansion.
 - **Not trying to ship the largest possible LoRA.** rank 32 is the cap until a deployed-and-validated v6 exists. rank 64+ tests deferred to v7+.
+
+## Operations log (added 2026-05-26)
+
+Real numbers and lessons after launching the 5-variant matrix:
+
+### Lambda compute reality vs estimate
+- **GH200 is ~3× slower than expected** on this Mamba model. Step time 93-104s vs the 30s/step we measured on local Blackwell. Root cause: `mamba_ssm` fast-path requires `selective_state_update` + `causal_conv1d_fn` + `causal_conv1d_update` CUDA kernels. Lambda's stock image doesn't ship them, transformers falls back to naive PyTorch implementation, and the Mamba2 mixer becomes the bottleneck.
+- **H100 SXM5 is fast (59s/step)** when it doesn't OOM — better hardware match, but 80 GB capacity is tight for Omni 30B at rank 32 + max_length 1024 (need 768).
+- **Spend projection at this pace** if all 3 Lambda runs go full 8000-12000 steps: ~$1,500 (vs my original $650 estimate). Decision to take diagnostic at step 2000 and kill non-promising runs caps this at ~$400.
+
+### Lambda environment debugging surfaces
+First-launch on Lambda's stock Ubuntu 22.04 image required this dep cascade, discovered the hard way:
+1. Pillow (system 8.x) lacks `Image.Resampling` → transformers' Bloom registration fails → upgrade to Pillow 12.x.
+2. numpy 2.x breaks torch 2.7's interop (`_ARRAY_API not found`) → pin `numpy<2`.
+3. Pandas ABI was compiled against numpy 1.x → pip upgrade pandas to numpy-2-compatible build.
+4. transformers Omni modeling requires: `librosa`, `open_clip_torch` (not `open_clip`), `timm`, `einops`, `soundfile`.
+5. HuggingFace dynamic module cache copies `modeling.py` and `modeling_nemotron_h.py` to one hash dir but `configuration_nemotron_h.py` + `configuration_radio.py` to a different hash dir → manual `cp` between dirs required.
+
+Bootstrap script `lambda_bootstrap_v2.sh` installs all deps in one shot.
+
+### Process-launch reliability lesson
+`sudo nohup python3 ... &` over SSH **silently kills the launched process** after some indeterminate time. Each restart attempt fails identically. Discovered by accident when `tmux new-session -d` reliably persisted while the same command via `sudo nohup` did not. **Always use `tmux new-session -d` for long-running detached jobs on Lambda**, not `nohup &`.
+
+### Diagnostic-at-2000 decision framework
+Rather than pre-capping training step count, let each run continue past the 2000-step mark and decide based on actual evaluation:
+- Each run saves a ckpt every 500 steps → 4 diagnostic points (500/1000/1500/2000) before any decision is made.
+- **Kill criteria**: (a) any output contains deprecated hotline (`1-800-273-8255`); (b) <13/16 on the 16-prompt suite at any ckpt; (c) plateau for 2+ consecutive ckpts; (d) mode collapse like H1 ckpt-60 (gave answer key).
+- **Continue criteria**: ckpt-2000 ≥14/16 AND no failed gates AND curve still rising. Resume from ckpt-2000 if continuing.
+- Wasted compute during eval window: ~1-2 hours of post-decision training before kill = ~$10-20 per Lambda run. Negligible vs the $1,500 worst-case alternative.
+
+### Hardware-vs-physical-environment risk
+mariposasuper had two unplanned reboot events in 12 hours (16:35 PDT then 02:32 PDT). The training boxes are on the same physical premises. Risk: a power blip could drop A (m03) or B (ROP1) mid-training, losing 3 days of compute. Mitigation: SFTTrainer saves every 500 steps, can resume. But the recurring drops are an underlying ops problem (UPS recommended) that's now affecting research velocity, not just production uptime.
