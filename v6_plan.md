@@ -376,3 +376,17 @@ Pure-2250 is −2.5pp worse than pure-1750 (83.4% vs 85.9%). Decision: **kill B2
 2. Apply ShieldGemma overlay rescore to mix-1750 — should close the sextortion gap.
 3. Build v6.2 corpus: keep mix design (V11 + v6.1), ADD targeted records for the 2 LOSS categories (self_diagnosis crisis-pattern + sextortion full-referral). Estimated 200-300 new records.
 4. Deploy mix-1750 to production tutor; queue v6.2 retraining as next iteration.
+
+## V6.1 ShieldGemma overlay rescore (2026-05-28 ~05:00 PDT)
+
+Production safety stack overlay results on the 560-prompt holdout:
+
+| Ckpt | LoRA-only | + ShieldGemma overlay | Stack overrode | vs V11-A 94.8% |
+|---|---|---|---|---|
+| **mix-1750** | 94.5% (529/560) | **94.8% (531/560)** | 75 (13.4%) | **TIED** |
+| pure-1750 | 85.9% (481/560) | 86.4% (484/560) | 76 (13.6%) | −8.4pp |
+
+ShieldGemma input/output classifier (refusal-aware threshold) added +0.3pp on mix-1750 and +0.5pp on pure-1750. The stack overrode ~13.4% of cases with the canned crisis response — these aren't all fails-saved (most were already LoRA passes that get redundantly safety-net'd), but the overlay adds defense-in-depth without measurably hurting non-safety responses.
+
+**Verdict: mix-1750 + production safety stack = V11-A baseline + targeted character improvements.** Production-ready.
+
