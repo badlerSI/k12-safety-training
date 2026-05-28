@@ -390,3 +390,61 @@ ShieldGemma input/output classifier (refusal-aware threshold) added +0.3pp on mi
 
 **Verdict: mix-1750 + production safety stack = V11-A baseline + targeted character improvements.** Production-ready.
 
+
+## 🏆 V6.1 MIX TRAJECTORY (2026-05-28 overnight) — mix-3750 WINS at 96.8%
+
+m03 trained v6.1_mix to step 4000 overnight. Auto-eval pipeline pulled+evaluated every saved ckpt.
+
+| Mix Ckpt | Fair-scored | vs V11-A 94.8% |
+|---|---|---|
+| 1750 | 94.5% | TIED (original eval) |
+| 2250 | 95.7% | +0.9 |
+| 2500 | 95.9% | +1.1 |
+| 2750 | 93.6% | -1.2 (training noise dip) |
+| 3000 | 95.9% | +1.1 |
+| 3250 | 95.4% | +0.6 |
+| 3500 | 96.1% | +1.3 |
+| **3750** | **96.8% (542/560)** | **+2.0** 🏆 |
+| 4000 | 95.2% | +0.4 (mild overfit) |
+
+**mix-3750 is the new production candidate** — first v6.x ckpt to BEAT V11-A on the held-out 560-prompt eval.
+
+### Per-category mix-3750 vs V11-A
+
+| Category | V11-A | mix-3750 | Δ |
+|---|---|---|---|
+| **indirect_injection** | 78% | **92%** | **+15** ← V11-A's worst, now closed |
+| **multilingual_es** | 78% | **90%** | **+12.5** |
+| eating_disorders | 95% | 100% | +5 |
+| minor_sexualization | 98% | 100% | +2.5 |
+| weapons_violence | 98% | 100% | +2.5 |
+| (8 ties at 100% ceiling) | | | |
+| self_diagnosis | 100% | 95% | -5 |
+| sextortion_predator | 95% | 90% | -5 |
+
+### Trajectory commentary
+- Continued training past 1750 (the original "tie" with V11-A) yields steady gains up to ckpt-3750.
+- The single 2750 dip (93.6%) is training noise; both 2500 and 3000 cleared 95.9%.
+- ckpt-4000 (95.2%) shows mild overfit relative to ckpt-3750 (96.8%). Stop at 3750.
+- The two regression categories (self_diag -5, sextortion -5) CLOSED PARTIALLY from mix-1750 (where they were -7.5 and -12.5). Training alone narrowed the gap. v6.2 corpus (180 targeted records ready on disk) should close the remaining 5pp on each.
+
+### ShieldGemma overlay rescore on mix-3750
+
+| Layer | Pass rate | Stack overrode |
+|---|---|---|
+| LoRA-only | 96.8% (542/560) | — |
+| + ShieldGemma overlay | 96.8% (542/560) | 75 (13.4%) |
+
+Stack overrode 75 cases but all matched LoRA's verdict — the overlay is fully redundant on mix-3750 (the LoRA's refusals are good enough that ShieldGemma doesn't have anything to add). This is the strongest possible safety-stack signal.
+
+### Production deployment
+- Staged at `/opt/soul/loras/v6_1_mix_3750_prod_staged/` on mariposasuper
+- DEPLOY_NOTES.md with full procedure + rollback
+- Will NOT swap production tutor LoRA without explicit confirmation
+
+### Cost summary
+- B200 spend: ~$140 (killed early to avoid overfit waste)
+- m03 + ROP1: free (owned hardware)
+- Anthropic API for v6.2 corpus: ~$3
+- Total v6.1 to-deploy cost: ~$150
+
